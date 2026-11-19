@@ -1,0 +1,30 @@
+# Secrets and data (live in ~/.subtrack/, but just in case)
+credentials.json
+token.json
+subtrack.db
+
+# Project-specific
+.env
+truth.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
