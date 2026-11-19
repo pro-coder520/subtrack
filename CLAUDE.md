@@ -166,8 +166,8 @@ python -m subtrack eval truth.csv
 ## Roadmap
 
 ### Phase 0: Setup
-- [ ] `pyproject.toml`, package skeleton, pytest running, `.gitignore`
-- [ ] Config: paths under `~/.subtrack`; env vars `GEMINI_API_KEY`, `SUBTRACK_MODEL`, `SUBTRACK_LOOKBACK` (default `18m`)
+- [x] `pyproject.toml`, package skeleton, pytest running, `.gitignore`
+- [x] Config: paths under `~/.subtrack`; env vars `GEMINI_API_KEY`, `SUBTRACK_MODEL`, `SUBTRACK_LOOKBACK` (default `18m`)
 - [ ] `auth` command: OAuth flow, save the token, print my Gmail address via `users.getProfile`
 
 Done when: `python -m subtrack auth` prints my address.
