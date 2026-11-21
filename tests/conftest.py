@@ -78,3 +78,72 @@ def load_fixture(name: str) -> dict:
 def gmail_message():
     """Factory: gmail_message("plain_only") -> Gmail API message dict."""
     return load_fixture
+
+
+# ---------------------------------------------------------------------------
+# Fake Gmail service (no network)
+# ---------------------------------------------------------------------------
+
+
+class _Request:
+    def __init__(self, result, log, call):
+        self._result = result
+        self._log = log
+        self._call = call
+
+    def execute(self, num_retries: int = 0):
+        self._log.append((*self._call, num_retries))
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
+
+class _Messages:
+    def __init__(self, svc: "FakeGmailService"):
+        self._svc = svc
+
+    def list(self, userId, q, maxResults=100, pageToken=None):
+        assert userId == "me"
+        pages = self._svc.pages.get(q, [{}])
+        index = int(pageToken) if pageToken else 0
+        page = dict(pages[index])
+        if index + 1 < len(pages):
+            page["nextPageToken"] = str(index + 1)
+        call = ("list", q, pageToken, maxResults)
+        return _Request(page, self._svc.calls, call)
+
+    def get(self, userId, id, format=None):
+        assert userId == "me"
+        call = ("get", id, format)
+        return _Request(self._svc.messages[id], self._svc.calls, call)
+
+
+class _Users:
+    def __init__(self, svc):
+        self._svc = svc
+
+    def messages(self):
+        return _Messages(self._svc)
+
+
+class FakeGmailService:
+    """Mimics service.users().messages().list/get(...).execute().
+
+    pages:    query -> list of page dicts ({"messages": [{"id": ...}]}).
+              pageTokens are generated automatically.
+    messages: message id -> full message dict (or an Exception to raise).
+    calls:    log of (kind, ..., num_retries) tuples for assertions.
+    """
+
+    def __init__(self, pages=None, messages=None):
+        self.pages = pages or {}
+        self.messages = messages or {}
+        self.calls: list[tuple] = []
+
+    def users(self):
+        return _Users(self)
+
+
+def ids(*names: str) -> dict:
+    """Build a list-page dict from message ids."""
+    return {"messages": [{"id": n, "threadId": n} for n in names]}

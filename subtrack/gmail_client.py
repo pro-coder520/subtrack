@@ -91,6 +91,81 @@ def get_profile(service: Resource) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Search and fetch
+# ---------------------------------------------------------------------------
+
+# Narrow queries from CLAUDE.md. Each one is prefixed with
+# newer_than:{SUBTRACK_LOOKBACK} by build_queries, so we never walk the
+# whole mailbox.
+BASE_QUERIES: list[str] = [
+    "category:purchases",
+    'subject:(receipt OR invoice OR "payment confirmation" OR "payment received")',
+    'subject:(subscription OR renewal OR renews OR "your plan" OR membership OR billing)',
+    'subject:(trial OR "trial ends")',
+    'subject:("payment failed" OR "payment declined" OR "update your payment" OR declined)',
+    'subject:("debit alert" OR "transaction alert" OR "card transaction" OR debited)',
+]
+
+# Retries with exponential backoff, handled by googleapiclient, on HTTP 429,
+# 5xx, and 403 rateLimitExceeded / userRateLimitExceeded.
+NUM_RETRIES = 3
+
+_LOOKBACK_RE = re.compile(r"^\d+[dmy]$")
+
+
+def build_queries(lookback: str) -> list[str]:
+    """Return the search queries, each limited to the lookback window.
+
+    `lookback` uses Gmail's newer_than syntax, e.g. "18m", "90d", "2y".
+    """
+    if not _LOOKBACK_RE.match(lookback):
+        raise ValueError(
+            f"Invalid lookback {lookback!r}: use a number followed by d, m or y (e.g. 18m)"
+        )
+    return [f"newer_than:{lookback} {q}" for q in BASE_QUERIES]
+
+
+def search_message_ids(
+    service: Resource, queries: list[str]
+) -> tuple[list[str], dict[str, int]]:
+    """Run each query across all result pages and merge the message IDs.
+
+    Returns (ids, hits): ids are de-duplicated, keeping the order in which
+    they were first seen; hits maps each query to its raw result count.
+    """
+    seen: dict[str, None] = {}  # dict keeps insertion order
+    hits: dict[str, int] = {}
+    for query in queries:
+        count = 0
+        page_token: str | None = None
+        while True:
+            kwargs = {"userId": "me", "q": query, "maxResults": 500}
+            if page_token:
+                kwargs["pageToken"] = page_token
+            resp = (
+                service.users().messages().list(**kwargs)
+                .execute(num_retries=NUM_RETRIES)
+            )
+            for m in resp.get("messages", []):
+                count += 1
+                seen.setdefault(m["id"], None)
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        hits[query] = count
+    return list(seen), hits
+
+
+def fetch_message(service: Resource, message_id: str) -> dict:
+    """Fetch one message with its full MIME payload."""
+    return (
+        service.users().messages()
+        .get(userId="me", id=message_id, format="full")
+        .execute(num_retries=NUM_RETRIES)
+    )
+
+
+# ---------------------------------------------------------------------------
 # MIME -> clean text
 # ---------------------------------------------------------------------------
 
