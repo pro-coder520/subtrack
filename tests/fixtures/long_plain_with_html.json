@@ -1,0 +1,23 @@
+{
+  "id": "m_long_plain_html",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Cloudbox <no-reply@cloudbox.example>",
+    "Subject": "Invoice for your Cloudbox Plus plan"
+  },
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "charset": "utf-8",
+        "text": "PLAIN VERSION\n\nHello Test User,\n\nThis is the invoice for your Cloudbox Plus plan. We charged USD 9.99 to your card for the period 1 March 2026 to 31 March 2026. Your subscription renews automatically every month until you cancel it in your account settings. Thank you for using Cloudbox.\n"
+      },
+      {
+        "mimeType": "text/html",
+        "charset": "utf-8",
+        "text": "<html><body><p>HTML VERSION</p><p>Charged USD 9.99.</p></body></html>"
+      }
+    ]
+  }
+}

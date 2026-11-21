@@ -1,0 +1,12 @@
+{
+  "id": "m_no_charset",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example TV <billing@tv.example>",
+    "Subject": "Subscription payment"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "text": "You paid ₦4,500 for Example TV Compact."
+  }
+}

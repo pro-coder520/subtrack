@@ -1,0 +1,13 @@
+{
+  "id": "m_cp1252",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Pro Tools <billing@protools.example>",
+    "Subject": "Payment received"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "windows-1252",
+    "text": "We received €9.99 for “Pro” — thank you."
+  }
+}

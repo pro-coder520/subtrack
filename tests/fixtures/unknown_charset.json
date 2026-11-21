@@ -1,0 +1,14 @@
+{
+  "id": "m_unknown_charset",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Odd Mailer <odd@mailer.example>",
+    "Subject": "Billing update"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "x-made-up-charset",
+    "encode_as": "utf-8",
+    "text": "Amount due: ₦1,200"
+  }
+}

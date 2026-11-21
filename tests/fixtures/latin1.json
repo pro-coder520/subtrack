@@ -1,0 +1,13 @@
+{
+  "id": "m_latin1",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Café Club <club@cafe.example>",
+    "Subject": "Café Club membership"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "iso-8859-1",
+    "text": "Your Café Club membership costs £4.99 per month."
+  }
+}

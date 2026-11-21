@@ -1,0 +1,24 @@
+{
+  "id": "m_short_plain_html",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Streamco <info@mailer.streamco.example>",
+    "Subject": "Your Streamco membership has renewed",
+    "List-Unsubscribe": "<mailto:unsub@mailer.streamco.example>"
+  },
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "charset": "utf-8",
+        "text": "View this email in your browser."
+      },
+      {
+        "mimeType": "text/html",
+        "charset": "utf-8",
+        "text": "<html><head><title>Receipt</title><style>.x{color:red}</style></head><body><script>var tracking = 1;</script><p>Hi&nbsp;Test&nbsp;User,</p><p>Your membership has <b>renewed</b>.</p><table><tr><td>Plan</td><td>Standard</td></tr><tr><td>Total</td><td>NGN&nbsp;4,400.00</td></tr></table><div>Next billing date:<br>1 April 2026</div></body></html>"
+      }
+    ]
+  }
+}

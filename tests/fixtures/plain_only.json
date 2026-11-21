@@ -1,0 +1,13 @@
+{
+  "id": "m_plain_only",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example Music <billing@music.example.com>",
+    "Subject": "Your Example Music receipt"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Hi Test User,\r\n\r\nThanks for your payment.\r\n\r\nPlan:   Premium Individual\r\nAmount: USD 10.99\r\nCard:   Visa ending 0000\r\n\r\nYour next payment is due on 1 April 2026.\r\n"
+  }
+}

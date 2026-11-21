@@ -6,9 +6,14 @@ to build a Gmail service and fetch the authenticated user's profile.
 
 from __future__ import annotations
 
+import base64
+import re
 import sys
-from pathlib import Path
+from datetime import datetime, timezone
+from email.header import decode_header, make_header
+from email.message import Message
 
+from bs4 import BeautifulSoup
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -16,6 +21,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
 
 from subtrack.config import CREDENTIALS_PATH, TOKEN_PATH, ensure_data_dir
+from subtrack.models import Email
 
 # gmail.readonly — the only scope we ever request
 SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -82,3 +88,159 @@ def get_profile(service: Resource) -> str:
     """Return the authenticated user's email address."""
     profile = service.users().getProfile(userId="me").execute()
     return profile["emailAddress"]
+
+
+# ---------------------------------------------------------------------------
+# MIME -> clean text
+# ---------------------------------------------------------------------------
+
+# Below this many characters, the plain-text part is treated as a stub
+# ("View this email in your browser") and the HTML part is used instead.
+PLAIN_MIN_CHARS = 200
+
+# Zero-width characters, plus soft hyphen (U+00AD) and combining grapheme
+# joiner (U+034F), which marketing emails use as invisible preheader padding.
+_INVISIBLE = dict.fromkeys(
+    map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad\u034f")
+)
+
+_BLOCK_TAGS = [
+    "p", "div", "tr", "li", "ul", "ol", "table", "section", "article",
+    "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
+]
+_CELL_TAGS = ["td", "th"]
+
+
+def strip_zero_width(text: str) -> str:
+    """Remove zero-width and other invisible padding characters."""
+    return text.translate(_INVISIBLE)
+
+
+def normalize_whitespace(text: str) -> str:
+    """Strip invisibles, turn NBSP into spaces, collapse runs of blanks."""
+    text = strip_zero_width(text).replace("\xa0", " ")
+    lines = [re.sub(r"[ \t\r\f\v]+", " ", ln).strip() for ln in text.splitlines()]
+    out: list[str] = []
+    for ln in lines:
+        if ln or (out and out[-1]):  # keep at most one blank line in a row
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+def decode_part_body(data: str, charset: str | None) -> str:
+    """Decode a Gmail base64url body using the part's charset.
+
+    Falls back to UTF-8 when the charset is missing or unknown; undecodable
+    bytes become U+FFFD rather than raising.
+    """
+    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    try:
+        return raw.decode(charset or "utf-8", errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")
+
+
+def html_to_text(html: str) -> str:
+    """Convert HTML to readable text, keeping line breaks at block boundaries."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "head", "noscript"]):
+        tag.decompose()
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    for tag in soup.find_all(_CELL_TAGS):
+        tag.insert_after(" ")
+    # Every block boundary adds newlines, so adjacent blocks would leave blank
+    # lines everywhere. Drop them: layout spacing carries no billing meaning
+    # and wastes the ~6,000-character LLM budget.
+    text = normalize_whitespace(soup.get_text())
+    return "\n".join(ln for ln in text.splitlines() if ln)
+
+
+def _part_headers(part: dict) -> dict[str, str]:
+    """Lower-cased header name -> value (first occurrence wins)."""
+    headers: dict[str, str] = {}
+    for h in part.get("headers", []):
+        headers.setdefault(h["name"].lower(), h["value"])
+    return headers
+
+
+def _charset_of(part: dict) -> str | None:
+    content_type = _part_headers(part).get("content-type")
+    if not content_type:
+        return None
+    msg = Message()
+    msg["Content-Type"] = content_type
+    return msg.get_content_charset()
+
+
+def _is_attachment(part: dict) -> bool:
+    if part.get("filename"):
+        return True
+    disposition = _part_headers(part).get("content-disposition", "")
+    return disposition.lower().startswith("attachment")
+
+
+def extract_text(payload: dict) -> str:
+    """Walk the MIME tree and return clean body text.
+
+    Uses the plain-text part unless it is shorter than PLAIN_MIN_CHARS (after
+    cleaning), in which case the HTML part is converted and used. Attachments
+    are ignored and never downloaded.
+    """
+    plains: list[str] = []
+    htmls: list[str] = []
+
+    def walk(part: dict) -> None:
+        if part.get("parts"):
+            for child in part["parts"]:
+                walk(child)
+            return
+        if _is_attachment(part):
+            return
+        data = part.get("body", {}).get("data")
+        if not data:
+            return
+        mime = part.get("mimeType", "").lower()
+        if mime == "text/plain":
+            plains.append(decode_part_body(data, _charset_of(part)))
+        elif mime == "text/html":
+            htmls.append(decode_part_body(data, _charset_of(part)))
+
+    walk(payload)
+
+    plain = normalize_whitespace("\n".join(plains))
+    if len(plain) >= PLAIN_MIN_CHARS or not htmls:
+        return plain
+    html_text = html_to_text("\n".join(htmls))
+    return html_text or plain
+
+
+def _decode_header_value(value: str) -> str:
+    """Decode RFC 2047 encoded-words if present (defensive)."""
+    if "=?" not in value:
+        return value
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
+
+
+def parse_message(msg: dict) -> Email:
+    """Turn a users.messages.get(format="full") response into an Email."""
+    payload = msg.get("payload", {})
+    headers = _part_headers(payload)
+    received_at = datetime.fromtimestamp(
+        int(msg["internalDate"]) / 1000, tz=timezone.utc
+    )
+    return Email(
+        message_id=msg["id"],
+        thread_id=msg.get("threadId", ""),
+        sender=strip_zero_width(_decode_header_value(headers.get("from", ""))).strip(),
+        subject=strip_zero_width(_decode_header_value(headers.get("subject", ""))).strip(),
+        received_at=received_at,
+        list_unsubscribe="list-unsubscribe" in headers,
+        text=extract_text(payload),
+    )

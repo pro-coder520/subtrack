@@ -1,0 +1,41 @@
+{
+  "id": "m_nested_attachment",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example AI <receipts@ai.example>",
+    "Subject": "Your receipt from Example AI #1234-5678"
+  },
+  "payload": {
+    "mimeType": "multipart/mixed",
+    "parts": [
+      {
+        "mimeType": "multipart/alternative",
+        "parts": [
+          {
+            "mimeType": "text/plain",
+            "charset": "utf-8",
+            "text": "Receipt"
+          },
+          {
+            "mimeType": "text/html",
+            "charset": "utf-8",
+            "text": "<html><body><h1>Receipt</h1><p>Example AI Plus subscription</p><p>Amount paid $20.00</p></body></html>"
+          }
+        ]
+      },
+      {
+        "mimeType": "application/pdf",
+        "filename": "receipt.pdf",
+        "disposition": "attachment; filename=\"receipt.pdf\"",
+        "attachmentId": "ATT_PDF_1"
+      },
+      {
+        "mimeType": "text/plain",
+        "charset": "utf-8",
+        "filename": "notes.txt",
+        "disposition": "attachment; filename=\"notes.txt\"",
+        "text": "ATTACHMENT TEXT MUST BE IGNORED"
+      }
+    ]
+  }
+}
