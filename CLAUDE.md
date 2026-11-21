@@ -173,12 +173,12 @@ python -m subtrack eval truth.csv
 Done when: `python -m subtrack auth` prints my address.
 
 ### Phase 1: Find candidate emails
-- [ ] Run the search queries, merge and deduplicate the message IDs
-- [ ] Fetch and parse MIME:
+- [x] Run the search queries, merge and deduplicate the message IDs
+- [x] Fetch and parse MIME:
   - walk the parts and decode base64url using the part's charset
   - use the HTML version when the plain-text part is under 200 characters
   - strip zero-width characters
-- [ ] `emails` table; skip IDs that were already processed
+- [x] `emails` table; skip IDs that were already processed
 - [ ] `sync --dry-run` prints sender and subject for each candidate
 
 Done when: a dry run on my inbox lists my receipts.
