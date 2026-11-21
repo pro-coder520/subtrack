@@ -1,0 +1,151 @@
+"""Tests for `sync --dry-run` (fake Gmail service, temp DB, no network)."""
+
+from __future__ import annotations
+
+import io
+from unittest import mock
+
+import httplib2
+import pytest
+from googleapiclient.errors import HttpError
+
+from subtrack import cli, config, db
+from subtrack.gmail_client import build_queries, parse_message
+from tests.conftest import FakeGmailService, ids, load_fixture
+
+LOOKBACK = "18m"
+Q = build_queries(LOOKBACK)
+
+
+def _service(id_order, extra_pages=None, broken=None):
+    """Fake service: Q[0] returns `id_order`, Q[1] repeats the first id."""
+    names = {
+        "m_plain_only": "plain_only",
+        "m_short_plain_html": "short_plain_with_html",
+        "m_latin1": "latin1",
+    }
+    messages = {mid: load_fixture(names[mid]) for mid in id_order if mid in names}
+    for mid in broken or []:
+        messages[mid] = HttpError(httplib2.Response({"status": 404}), b"Not Found")
+    pages = {Q[0]: [ids(*id_order)], Q[1]: [ids(id_order[0])]}
+    pages.update(extra_pages or {})
+    return FakeGmailService(pages=pages, messages=messages)
+
+
+def _run(service, processed=frozenset(), limit=None):
+    out, err = io.StringIO(), io.StringIO()
+    emails = cli.run_dry_sync(service, set(processed), LOOKBACK, limit, out=out, err=err)
+    return emails, out.getvalue(), err.getvalue()
+
+
+class TestRunDrySync:
+    def test_lists_sender_and_subject_for_each_candidate(self):
+        svc = _service(["m_plain_only", "m_short_plain_html"])
+        emails, out, _ = _run(svc)
+        assert len(emails) == 2
+        assert "Example Music <billing@music.example.com>" in out
+        assert "Your Example Music receipt" in out
+        assert "Your Streamco membership has renewed" in out
+        assert "2 candidates listed. Dry run: nothing was saved." in out
+
+    def test_shows_hits_per_query_and_dedupes(self):
+        svc = _service(["m_plain_only", "m_latin1"])
+        _, out, _ = _run(svc)
+        assert f"    2  {Q[0]}" in out
+        assert f"    1  {Q[1]}" in out
+        assert f"    0  {Q[2]}" in out
+        assert "2 unique messages, 0 already processed, fetching 2." in out
+
+    def test_never_prints_body_text(self):
+        svc = _service(["m_plain_only"])
+        _, out, err = _run(svc)
+        body = parse_message(load_fixture("plain_only")).text
+        for line in body.splitlines():
+            if line.strip():
+                assert line not in out and line not in err
+
+    def test_skips_already_processed(self):
+        svc = _service(["m_plain_only", "m_latin1"])
+        emails, out, _ = _run(svc, processed={"m_plain_only"})
+        assert [e.message_id for e in emails] == ["m_latin1"]
+        assert "1 already processed, fetching 1." in out
+        fetched = [c[1] for c in svc.calls if c[0] == "get"]
+        assert fetched == ["m_latin1"]
+
+    def test_limit(self):
+        svc = _service(["m_plain_only", "m_latin1", "m_short_plain_html"])
+        emails, out, _ = _run(svc, limit=2)
+        assert [e.message_id for e in emails] == ["m_plain_only", "m_latin1"]
+        assert "fetching 2." in out
+        assert len([c for c in svc.calls if c[0] == "get"]) == 2
+
+    def test_fetch_error_is_reported_and_skipped(self):
+        svc = _service(["m_plain_only", "m_gone"], broken=["m_gone"])
+        emails, out, err = _run(svc)
+        assert [e.message_id for e in emails] == ["m_plain_only"]
+        assert "Could not fetch m_gone: HTTP 404" in err
+        assert "1 candidates listed, 1 failed to fetch." in out
+
+    def test_no_results(self):
+        svc = FakeGmailService(pages={})
+        emails, out, _ = _run(svc)
+        assert emails == []
+        assert "0 unique messages" in out
+        assert "0 candidates listed." in out
+
+
+class TestCmdSync:
+    def test_without_dry_run_exits_with_message(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["sync"])
+        assert exc.value.code == 2
+        assert "--dry-run" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("bad", ["0", "-3", "abc"])
+    def test_limit_must_be_positive_int(self, bad):
+        with pytest.raises(SystemExit):
+            cli.main(["sync", "--dry-run", "--limit", bad])
+
+    def test_dry_run_does_not_create_database(self, tmp_path, monkeypatch):
+        db_path = tmp_path / ".subtrack" / "subtrack.db"
+        monkeypatch.setattr(config, "DB_PATH", db_path)
+        svc = _service(["m_plain_only"])
+        with (
+            mock.patch.object(cli, "authenticate", return_value="creds"),
+            mock.patch.object(cli, "get_service", return_value=svc),
+        ):
+            cli.main(["sync", "--dry-run"])
+        assert not db_path.exists()
+
+    def test_dry_run_reads_processed_ids_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
+        db_path = tmp_path / "subtrack.db"
+        monkeypatch.setattr(config, "DB_PATH", db_path)
+        conn = db.connect(db_path)
+        db.upsert_email(conn, parse_message(load_fixture("plain_only")), "extracted")
+        conn.close()
+
+        svc = _service(["m_plain_only", "m_latin1"])
+        with (
+            mock.patch.object(cli, "authenticate", return_value="creds"),
+            mock.patch.object(cli, "get_service", return_value=svc),
+        ):
+            cli.main(["sync", "--dry-run", "--limit", "5"])
+
+        out = capsys.readouterr().out
+        assert "1 already processed" in out
+        assert "Café Club membership" in out
+        conn = db.connect(db_path)
+        assert conn.execute("SELECT count(*) FROM emails").fetchone()[0] == 1
+        conn.close()
+
+    def test_uses_lookback_from_env(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DB_PATH", tmp_path / "none.db")
+        monkeypatch.setenv("SUBTRACK_LOOKBACK", "3m")
+        svc = FakeGmailService(pages={})
+        with (
+            mock.patch.object(cli, "authenticate", return_value="creds"),
+            mock.patch.object(cli, "get_service", return_value=svc),
+        ):
+            cli.main(["sync", "--dry-run"])
+        queries = {c[1] for c in svc.calls if c[0] == "list"}
+        assert queries and all(q.startswith("newer_than:3m ") for q in queries)
