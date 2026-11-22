@@ -130,8 +130,8 @@ tests/
 
 - One-time setup: create a Google Cloud project, enable the Gmail API, and set the OAuth consent screen to External / Testing with me as a test user. Then create a **Desktop app** OAuth client.
 - In Testing mode, refresh tokens expire after 7 days. Catch `RefreshError` and re-run the browser sign-in. Alternatively, switch the publishing status to "In production" (unverified is fine, since I'm the only user).
-- Search with Gmail query syntax and merge the results of these queries:
-  - `newer_than:18m category:purchases`
+- Search with Gmail query syntax and merge the results of these queries. Every query is limited to `newer_than:{SUBTRACK_LOOKBACK}` (default `18m`):
+  - `category:purchases`
   - `subject:(receipt OR invoice OR "payment confirmation" OR "payment received")`
   - `subject:(subscription OR renewal OR renews OR "your plan" OR membership OR billing)`
   - `subject:(trial OR "trial ends")`
@@ -179,7 +179,7 @@ Done when: `python -m subtrack auth` prints my address.
   - use the HTML version when the plain-text part is under 200 characters
   - strip zero-width characters
 - [x] `emails` table; skip IDs that were already processed
-- [ ] `sync --dry-run` prints sender and subject for each candidate
+- [x] `sync --dry-run` prints sender and subject for each candidate
 
 Done when: a dry run on my inbox lists my receipts.
 
