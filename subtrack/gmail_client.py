@@ -303,6 +303,11 @@ def _decode_header_value(value: str) -> str:
         return value
 
 
+def _clean_header(value: str) -> str:
+    """Decode RFC 2047 words, drop zero-width chars, and collapse whitespace."""
+    return re.sub(r"\s+", " ", strip_zero_width(_decode_header_value(value))).strip()
+
+
 def parse_message(msg: dict) -> Email:
     """Turn a users.messages.get(format="full") response into an Email."""
     payload = msg.get("payload", {})
@@ -313,8 +318,8 @@ def parse_message(msg: dict) -> Email:
     return Email(
         message_id=msg["id"],
         thread_id=msg.get("threadId", ""),
-        sender=strip_zero_width(_decode_header_value(headers.get("from", ""))).strip(),
-        subject=strip_zero_width(_decode_header_value(headers.get("subject", ""))).strip(),
+        sender=_clean_header(headers.get("from", "")),
+        subject=_clean_header(headers.get("subject", "")),
         received_at=received_at,
         list_unsubscribe="list-unsubscribe" in headers,
         text=extract_text(payload),

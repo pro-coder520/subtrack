@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+import time
+from collections.abc import Callable
 from typing import TextIO
 
 from googleapiclient.errors import HttpError
@@ -50,11 +53,39 @@ def load_processed_ids() -> set[str]:
         conn.close()
 
 
+# Pause between Gmail messages.get calls to stay under the per-user/minute
+# quota (~300 full fetches/min at 20 units each; 0.25s => <=240/min).
+FETCH_DELAY_SECONDS = 0.25
+
+
+def _collapse_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _format_http_error(exc: HttpError) -> str:
+    """Format a Gmail HttpError with status code and Google's error reason."""
+    status = getattr(exc.resp, "status", "?")
+    reason = (getattr(exc, "reason", "") or "").strip()
+    details = getattr(exc, "error_details", None)
+    code_reason = ""
+    if isinstance(details, list) and details and isinstance(details[0], dict):
+        code_reason = str(details[0].get("reason", "") or "").strip()
+
+    head = f"HTTP {status}"
+    if code_reason:
+        head += f" ({code_reason})"
+    if reason and reason != code_reason:
+        return f"{head}: {reason}"
+    return head
+
+
 def _format_line(email: Email) -> str:
     # Sender is padded for alignment but never truncated: the domain at the
     # end is what tells a real receipt from a lookalike.
     date = email.received_at.astimezone().strftime("%Y-%m-%d")
-    return f"{date}  {email.sender:<40}  {email.subject}"
+    sender = _collapse_ws(email.sender)
+    subject = _collapse_ws(email.subject)
+    return f"{date}  {sender:<40}  {subject}"
 
 
 def run_dry_sync(
@@ -64,6 +95,8 @@ def run_dry_sync(
     limit: int | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
+    fetch_delay: float = FETCH_DELAY_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[Email]:
     """Search, fetch and parse candidates, print them, and save nothing.
 
@@ -89,13 +122,14 @@ def run_dry_sync(
     emails: list[Email] = []
     failed = 0
     for n, message_id in enumerate(todo, start=1):
+        if n > 1 and fetch_delay > 0:
+            sleep(fetch_delay)
         print(f"\rFetching {n}/{len(todo)}", end="", file=err, flush=True)
         try:
             emails.append(parse_message(fetch_message(service, message_id)))
         except HttpError as exc:
             failed += 1
-            status = getattr(exc.resp, "status", "?")
-            print(f"\nCould not fetch {message_id}: HTTP {status}", file=err)
+            print(f"\nCould not fetch {message_id}: {_format_http_error(exc)}", file=err)
     if todo:
         print(file=err)
 

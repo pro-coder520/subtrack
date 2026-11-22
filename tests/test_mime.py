@@ -164,3 +164,14 @@ class TestParseMessage:
         email = parse_message(msg)
         assert email.subject == "" and email.sender == ""
         assert email.text == "hi"
+
+    def test_folded_whitespace_in_headers_is_collapsed(self, gmail_message):
+        msg = gmail_message("plain_only")
+        for h in msg["payload"]["headers"]:
+            if h["name"] == "From":
+                h["value"] = "Example\r\n\tMusic <billing@music.example.com>"
+            elif h["name"] == "Subject":
+                h["value"] = "Your receipt\n  for\tMarch"
+        email = parse_message(msg)
+        assert email.sender == "Example Music <billing@music.example.com>"
+        assert email.subject == "Your receipt for March"

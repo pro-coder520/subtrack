@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import json
+from datetime import datetime, timezone
 from unittest import mock
 
 import httplib2
@@ -11,6 +13,7 @@ from googleapiclient.errors import HttpError
 
 from subtrack import cli, config, db
 from subtrack.gmail_client import build_queries, parse_message
+from subtrack.models import Email
 from tests.conftest import FakeGmailService, ids, load_fixture
 
 LOOKBACK = "18m"
@@ -32,16 +35,25 @@ def _service(id_order, extra_pages=None, broken=None):
     return FakeGmailService(pages=pages, messages=messages)
 
 
-def _run(service, processed=frozenset(), limit=None):
+def _run(service, processed=frozenset(), limit=None, sleep=None):
     out, err = io.StringIO(), io.StringIO()
-    emails = cli.run_dry_sync(service, set(processed), LOOKBACK, limit, out=out, err=err)
-    return emails, out.getvalue(), err.getvalue()
+    sleeps: list[float] = []
+    emails = cli.run_dry_sync(
+        service,
+        set(processed),
+        LOOKBACK,
+        limit,
+        out=out,
+        err=err,
+        sleep=sleep if sleep is not None else sleeps.append,
+    )
+    return emails, out.getvalue(), err.getvalue(), sleeps
 
 
 class TestRunDrySync:
     def test_lists_sender_and_subject_for_each_candidate(self):
         svc = _service(["m_plain_only", "m_short_plain_html"])
-        emails, out, _ = _run(svc)
+        emails, out, _, _ = _run(svc)
         assert len(emails) == 2
         assert "Example Music <billing@music.example.com>" in out
         assert "Your Example Music receipt" in out
@@ -50,7 +62,7 @@ class TestRunDrySync:
 
     def test_shows_hits_per_query_and_dedupes(self):
         svc = _service(["m_plain_only", "m_latin1"])
-        _, out, _ = _run(svc)
+        _, out, _, _ = _run(svc)
         assert f"    2  {Q[0]}" in out
         assert f"    1  {Q[1]}" in out
         assert f"    0  {Q[2]}" in out
@@ -58,7 +70,7 @@ class TestRunDrySync:
 
     def test_never_prints_body_text(self):
         svc = _service(["m_plain_only"])
-        _, out, err = _run(svc)
+        _, out, err, _ = _run(svc)
         body = parse_message(load_fixture("plain_only")).text
         for line in body.splitlines():
             if line.strip():
@@ -66,7 +78,7 @@ class TestRunDrySync:
 
     def test_skips_already_processed(self):
         svc = _service(["m_plain_only", "m_latin1"])
-        emails, out, _ = _run(svc, processed={"m_plain_only"})
+        emails, out, _, _ = _run(svc, processed={"m_plain_only"})
         assert [e.message_id for e in emails] == ["m_latin1"]
         assert "1 already processed, fetching 1." in out
         fetched = [c[1] for c in svc.calls if c[0] == "get"]
@@ -74,22 +86,67 @@ class TestRunDrySync:
 
     def test_limit(self):
         svc = _service(["m_plain_only", "m_latin1", "m_short_plain_html"])
-        emails, out, _ = _run(svc, limit=2)
+        emails, out, _, _ = _run(svc, limit=2)
         assert [e.message_id for e in emails] == ["m_plain_only", "m_latin1"]
         assert "fetching 2." in out
         assert len([c for c in svc.calls if c[0] == "get"]) == 2
 
+    def test_throttles_between_fetches(self):
+        svc = _service(["m_plain_only", "m_latin1", "m_short_plain_html"])
+        _, _, _, sleeps = _run(svc)
+        assert sleeps == [cli.FETCH_DELAY_SECONDS, cli.FETCH_DELAY_SECONDS]
+
+    def test_single_message_does_not_sleep(self):
+        svc = _service(["m_plain_only"])
+        _, _, _, sleeps = _run(svc)
+        assert sleeps == []
+
     def test_fetch_error_is_reported_and_skipped(self):
         svc = _service(["m_plain_only", "m_gone"], broken=["m_gone"])
-        emails, out, err = _run(svc)
+        emails, out, err, _ = _run(svc)
         assert [e.message_id for e in emails] == ["m_plain_only"]
         assert "Could not fetch m_gone: HTTP 404" in err
         assert "1 candidates listed, 1 failed to fetch." in out
 
+    def test_fetch_error_prints_google_reason(self):
+        svc = _service(["m_plain_only", "m_throttled"])
+        body = json.dumps({
+            "error": {
+                "code": 403,
+                "message": "User-rate limit exceeded.",
+                "errors": [{"reason": "userRateLimitExceeded"}],
+            }
+        }).encode("utf-8")
+        svc.messages["m_throttled"] = HttpError(
+            httplib2.Response({"status": 403}), body
+        )
+        emails, _, err, _ = _run(svc)
+        assert [e.message_id for e in emails] == ["m_plain_only"]
+        assert (
+            "Could not fetch m_throttled: HTTP 403 (userRateLimitExceeded): "
+            "User-rate limit exceeded."
+        ) in err
+
+    def test_format_line_collapses_newlines_and_tabs(self):
+        email = Email(
+            message_id="m1",
+            thread_id="t1",
+            sender="Acme\r\n\tBilling <a@acme.example>",
+            subject="Line one\nLine\ttwo",
+            received_at=datetime(2026, 3, 1, 9, 15, tzinfo=timezone.utc),
+            list_unsubscribe=False,
+            text="",
+        )
+        line = cli._format_line(email)
+        assert "\n" not in line and "\r" not in line and "\t" not in line
+        assert "Acme Billing <a@acme.example>" in line
+        assert "Line one Line two" in line
+
     def test_no_results(self):
         svc = FakeGmailService(pages={})
-        emails, out, _ = _run(svc)
+        emails, out, _, sleeps = _run(svc)
         assert emails == []
+        assert sleeps == []
         assert "0 unique messages" in out
         assert "0 candidates listed." in out
 
