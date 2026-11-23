@@ -55,12 +55,20 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def processed_ids(conn: sqlite3.Connection) -> set[str]:
-    """IDs a normal sync should not fetch again."""
-    placeholders = ",".join("?" for _ in PROCESSED_STATUSES)
+def processed_ids(
+    conn: sqlite3.Connection, recheck_skipped: bool = False
+) -> set[str]:
+    """IDs a sync should not fetch again.
+
+    By default, both 'skipped' and 'extracted' count as processed (only 'error'
+    is retried). When recheck_skipped=True, only 'extracted' IDs are skipped so
+    previously skipped emails are fetched and scored again.
+    """
+    statuses = ("extracted",) if recheck_skipped else PROCESSED_STATUSES
+    placeholders = ",".join("?" for _ in statuses)
     rows = conn.execute(
         f"SELECT message_id FROM emails WHERE status IN ({placeholders})",
-        PROCESSED_STATUSES,
+        statuses,
     )
     return {r["message_id"] for r in rows}
 

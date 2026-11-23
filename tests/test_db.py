@@ -108,3 +108,9 @@ class TestProcessedIds:
         db.upsert_email(conn, make_email("x"), "extracted")
         db.upsert_email(conn, make_email("e"), "error")
         assert db.processed_ids(conn) == {"s", "x"}
+
+    def test_recheck_skipped_only_excludes_extracted(self, conn):
+        db.upsert_email(conn, make_email("s"), "skipped")
+        db.upsert_email(conn, make_email("x"), "extracted")
+        db.upsert_email(conn, make_email("e"), "error")
+        assert db.processed_ids(conn, recheck_skipped=True) == {"x"}

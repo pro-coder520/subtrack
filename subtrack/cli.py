@@ -22,6 +22,7 @@ from subtrack.gmail_client import (
     search_message_ids,
 )
 from subtrack.models import Email
+from subtrack.prefilter import PrefilterResult, score_email
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +43,13 @@ def cmd_auth(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_processed_ids() -> set[str]:
+def load_processed_ids(recheck_skipped: bool = False) -> set[str]:
     """Read processed IDs without creating the database if it doesn't exist."""
     if not config.DB_PATH.exists():
         return set()
     conn = db.connect(config.DB_PATH)
     try:
-        return db.processed_ids(conn)
+        return db.processed_ids(conn, recheck_skipped=recheck_skipped)
     finally:
         conn.close()
 
@@ -79,13 +80,18 @@ def _format_http_error(exc: HttpError) -> str:
     return head
 
 
-def _format_line(email: Email) -> str:
+def _format_line(email: Email, result: PrefilterResult | None = None) -> str:
     # Sender is padded for alignment but never truncated: the domain at the
     # end is what tells a real receipt from a lookalike.
     date = email.received_at.astimezone().strftime("%Y-%m-%d")
     sender = _collapse_ws(email.sender)
     subject = _collapse_ws(email.subject)
-    return f"{date}  {sender:<40}  {subject}"
+    if result is None:
+        return f"{date}  {sender:<40}  {subject}"
+    tag = "KEEP" if result.keep else "SKIP"
+    score_str = f"{result.score:+.1f}"
+    reasons_str = ", ".join(result.reasons) if result.reasons else "none"
+    return f"{tag}  ({score_str:>5})  {date}  {sender:<40}  {subject}  [{reasons_str}]"
 
 
 def run_dry_sync(
@@ -97,10 +103,10 @@ def run_dry_sync(
     err: TextIO | None = None,
     fetch_delay: float = FETCH_DELAY_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
-) -> list[Email]:
-    """Search, fetch and parse candidates, print them, and save nothing.
+) -> list[tuple[Email, PrefilterResult]]:
+    """Search, fetch, parse, and prefilter candidates, print results, save nothing.
 
-    Returns the parsed emails (in memory only).
+    Returns a list of (Email, PrefilterResult) pairs (in memory only).
     """
     out = out or sys.stdout
     err = err or sys.stderr
@@ -119,42 +125,61 @@ def run_dry_sync(
         file=out,
     )
 
-    emails: list[Email] = []
+    scored: list[tuple[Email, PrefilterResult]] = []
     failed = 0
     for n, message_id in enumerate(todo, start=1):
         if n > 1 and fetch_delay > 0:
             sleep(fetch_delay)
         print(f"\rFetching {n}/{len(todo)}", end="", file=err, flush=True)
         try:
-            emails.append(parse_message(fetch_message(service, message_id)))
+            email = parse_message(fetch_message(service, message_id))
+            scored.append((email, score_email(email)))
         except HttpError as exc:
             failed += 1
             print(f"\nCould not fetch {message_id}: {_format_http_error(exc)}", file=err)
     if todo:
         print(file=err)
 
-    print(file=out)
-    for email in sorted(emails, key=lambda e: e.received_at, reverse=True):
-        print(_format_line(email), file=out)
+    kept = sorted(
+        [(e, r) for e, r in scored if r.keep],
+        key=lambda pair: pair[0].received_at,
+        reverse=True,
+    )
+    skipped = sorted(
+        [(e, r) for e, r in scored if not r.keep],
+        key=lambda pair: pair[0].received_at,
+        reverse=True,
+    )
+
+    if kept:
+        print(f"\n--- KEPT ({len(kept)}) ---", file=out)
+        for email, res in kept:
+            print(_format_line(email, res), file=out)
+
+    if skipped:
+        print(f"\n--- SKIPPED ({len(skipped)}) ---", file=out)
+        for email, res in skipped:
+            print(_format_line(email, res), file=out)
 
     print(file=out)
-    summary = f"{len(emails)} candidates listed"
+    summary = f"{len(scored)} candidates checked: {len(kept)} kept, {len(skipped)} skipped"
     if failed:
         summary += f", {failed} failed to fetch"
     print(f"{summary}. Dry run: nothing was saved.", file=out)
-    return emails
+    return scored
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
     if not args.dry_run:
         print(
             "sync without --dry-run becomes available in Phase 3 (extraction). "
-            "Use: python -m subtrack sync --dry-run [--limit N]",
+            "Use: python -m subtrack sync --dry-run [--limit N] [--recheck-skipped]",
             file=sys.stderr,
         )
         sys.exit(2)
     service = get_service(authenticate())
-    run_dry_sync(service, load_processed_ids(), config.get_lookback(), args.limit)
+    processed = load_processed_ids(recheck_skipped=args.recheck_skipped)
+    run_dry_sync(service, processed, config.get_lookback(), args.limit)
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync = sub.add_parser("sync", help="Find candidate billing emails in Gmail")
     sync.add_argument("--dry-run", action="store_true",
-                      help="List candidates (sender, subject) without saving anything")
+                      help="List candidates (keep/skip with reasons) without saving anything")
     sync.add_argument("--limit", type=_positive_int, metavar="N",
                       help="Fetch at most N new messages")
+    sync.add_argument("--recheck-skipped", action="store_true",
+                      help="Re-fetch and re-score emails previously marked as skipped")
 
     return parser
 
