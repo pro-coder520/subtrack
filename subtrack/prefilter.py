@@ -67,6 +67,155 @@ def is_otp_or_password_reset(email: Email) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Bank and card alerts (Domain rule)
+# ---------------------------------------------------------------------------
+
+# Debit/transaction alerts from banks or payment switches.
+# Card-decline alerts ("card was declined", "payment declined") are NOT
+# filtered out by this rule — they are always scored normally so rare,
+# high-priority declines are never dropped even for smaller merchants.
+_BANK_ALERT_SUBJECT_RE = re.compile(
+    r"""
+    \b(?:debit|credit|transaction)\s+alert\b
+    | \bcard\s+transaction\b
+    | \bsuccessful\s+transaction\b
+    | \baccount\s+debit(?:ed)?\b
+    | \b(?:pos|nip)\s+(?:transaction|transfer|debit)\b
+    | \bdebited\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_CARD_DECLINE_RE = re.compile(
+    r"\b(?:card\s+(?:was\s+)?declined|payment\s+declined|transaction\s+declined)\b",
+    re.IGNORECASE,
+)
+
+# Boilerplate/footer noise that must never count as an online service.
+_URL_OR_EMAIL_RE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+)", re.IGNORECASE)
+
+_FOOTER_CUTOFF_RE = re.compile(
+    r"""
+    \b(?:disclaimer|confidentiality\s+notice|thank\s+you\s+for\s+banking
+        |thank\s+you\s+for\s+choosing|for\s+(?:enquiries|inquiries))\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_FOOTER_LINE_RE = re.compile(
+    r"""
+    \b(?:internet\s+banking|mobile\s+banking|online\s+banking
+        |download\s+(?:our|the)\s+(?:mobile\s+)?app
+        |available\s+on\s+(?:the\s+)?app\s+store
+        |get\s+it\s+on\s+google\s+play
+        |customer\s+care|contact\s+cent(?:er|re)|call\s+cent(?:er|re)
+        |never\s+share\s+your\s+(?:pin|password|otp)
+        |do\s+not\s+reply|automated\s+(?:email|message)
+        |follow\s+us\s+on|unsubscribe)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Known online services (international SaaS/streaming/cloud/AI + Nigeria).
+# Apple/Google patterns require billing/product qualifiers so generic
+# "Google Play" / "Apple App Store" app-download badges in footers don't match.
+_ONLINE_SERVICES: list[tuple[str, re.Pattern[str]]] = [
+    ("netflix", re.compile(r"\bnetflix\b", re.IGNORECASE)),
+    ("spotify", re.compile(r"\bspotify\b", re.IGNORECASE)),
+    ("openai", re.compile(r"\b(?:openai|chatgpt)\b", re.IGNORECASE)),
+    ("anthropic", re.compile(r"\b(?:anthropic|claude\.ai|claude\s+pro)\b", re.IGNORECASE)),
+    ("apple", re.compile(r"\b(?:apple\.com/bill|apple\.com|itunes|icloud|apple\s+(?:music|one|tv|arcade))\b", re.IGNORECASE)),
+    ("google", re.compile(r"\b(?:google\s*\*|google\s+(?:play|one|cloud|workspace|storage)|youtube)\b", re.IGNORECASE)),
+    ("aws", re.compile(r"\b(?:aws|amazon\s+web\s+services)\b", re.IGNORECASE)),
+    ("amazon_prime", re.compile(r"\b(?:amazon\s+prime|prime\s+video|audible)\b", re.IGNORECASE)),
+    ("microsoft", re.compile(r"\b(?:microsoft\s*(?:365)?|office\s*365|xbox|azure)\b", re.IGNORECASE)),
+    ("dstv", re.compile(r"\bdstv\b", re.IGNORECASE)),
+    ("gotv", re.compile(r"\bgotv\b", re.IGNORECASE)),
+    ("showmax", re.compile(r"\bshowmax\b", re.IGNORECASE)),
+    ("startimes", re.compile(r"\bstartimes\b", re.IGNORECASE)),
+    ("starlink", re.compile(r"\bstarlink\b", re.IGNORECASE)),
+    ("spectranet", re.compile(r"\bspectranet\b", re.IGNORECASE)),
+    ("github", re.compile(r"\bgithub\b", re.IGNORECASE)),
+    ("gitlab", re.compile(r"\bgitlab\b", re.IGNORECASE)),
+    ("cursor", re.compile(r"\bcursor\b", re.IGNORECASE)),
+    ("vercel", re.compile(r"\bvercel\b", re.IGNORECASE)),
+    ("railway", re.compile(r"\brailway\b", re.IGNORECASE)),
+    ("netlify", re.compile(r"\bnetlify\b", re.IGNORECASE)),
+    ("render", re.compile(r"\brender\.com\b", re.IGNORECASE)),
+    ("heroku", re.compile(r"\bheroku\b", re.IGNORECASE)),
+    ("digitalocean", re.compile(r"\bdigitalocean\b", re.IGNORECASE)),
+    ("cloudflare", re.compile(r"\bcloudflare\b", re.IGNORECASE)),
+    ("supabase", re.compile(r"\bsupabase\b", re.IGNORECASE)),
+    ("sentry", re.compile(r"\bsentry\b", re.IGNORECASE)),
+    ("coderabbit", re.compile(r"\bcoderabbit\b", re.IGNORECASE)),
+    ("jetbrains", re.compile(r"\bjetbrains\b", re.IGNORECASE)),
+    ("replit", re.compile(r"\breplit\b", re.IGNORECASE)),
+    ("adobe", re.compile(r"\badobe\b", re.IGNORECASE)),
+    ("figma", re.compile(r"\bfigma\b", re.IGNORECASE)),
+    ("canva", re.compile(r"\bcanva\b", re.IGNORECASE)),
+    ("notion", re.compile(r"\bnotion\b", re.IGNORECASE)),
+    ("linear", re.compile(r"\blinear\.app\b", re.IGNORECASE)),
+    ("slack", re.compile(r"\bslack\b", re.IGNORECASE)),
+    ("zoom", re.compile(r"\bzoom\.(?:us|com)\b|\bzoom\s+video\b", re.IGNORECASE)),
+    ("discord", re.compile(r"\bdiscord\b", re.IGNORECASE)),
+    ("dropbox", re.compile(r"\bdropbox\b", re.IGNORECASE)),
+    ("1password", re.compile(r"\b1password\b", re.IGNORECASE)),
+    ("bitwarden", re.compile(r"\bbitwarden\b", re.IGNORECASE)),
+    ("proton", re.compile(r"\bproton(?:\s*(?:mail|vpn|pass|unlimited))?\b", re.IGNORECASE)),
+    ("nordvpn", re.compile(r"\bnordvpn\b", re.IGNORECASE)),
+    ("expressvpn", re.compile(r"\bexpressvpn\b", re.IGNORECASE)),
+    ("linkedin", re.compile(r"\blinkedin\b", re.IGNORECASE)),
+    ("scribd", re.compile(r"\bscribd\b", re.IGNORECASE)),
+    ("medium", re.compile(r"\bmedium\.com\b|\bmedium\s+membership\b", re.IGNORECASE)),
+    ("substack", re.compile(r"\bsubstack\b", re.IGNORECASE)),
+    ("duolingo", re.compile(r"\bduolingo\b", re.IGNORECASE)),
+    ("coursera", re.compile(r"\bcoursera\b", re.IGNORECASE)),
+    ("udemy", re.compile(r"\budemy\b", re.IGNORECASE)),
+    ("grammarly", re.compile(r"\bgrammarly\b", re.IGNORECASE)),
+    ("chess.com", re.compile(r"\bchess\.com\b", re.IGNORECASE)),
+    ("playstation", re.compile(r"\bplaystation\b|\bps\s*plus\b", re.IGNORECASE)),
+    ("crunchyroll", re.compile(r"\bcrunchyroll\b", re.IGNORECASE)),
+    ("twitch", re.compile(r"\btwitch\b", re.IGNORECASE)),
+    ("namecheap", re.compile(r"\bnamecheap\b", re.IGNORECASE)),
+    ("godaddy", re.compile(r"\bgodaddy\b", re.IGNORECASE)),
+    ("porkbun", re.compile(r"\bporkbun\b", re.IGNORECASE)),
+    ("paddle", re.compile(r"\bpaddle\.(?:net|com)\b", re.IGNORECASE)),
+    ("fastspring", re.compile(r"\bfastspring\b", re.IGNORECASE)),
+    ("lemonsqueezy", re.compile(r"\blemonsqueezy\b", re.IGNORECASE)),
+]
+
+
+def is_bank_or_card_alert(email: Email) -> bool:
+    """Return True for bank/switch debit or transaction alerts (excluding declines)."""
+    if _CARD_DECLINE_RE.search(email.subject) or _CARD_DECLINE_RE.search(email.text[:500]):
+        return False
+    return bool(_BANK_ALERT_SUBJECT_RE.search(email.subject))
+
+
+def _strip_bank_footer_noise(text: str) -> str:
+    """Remove bank footer boilerplate, URLs and email addresses before matching."""
+    cut = _FOOTER_CUTOFF_RE.search(text)
+    if cut:
+        text = text[: cut.start()]
+    kept_lines: list[str] = []
+    for line in text.splitlines():
+        if _FOOTER_LINE_RE.search(line):
+            continue
+        cleaned = _URL_OR_EMAIL_RE.sub(" ", line)
+        kept_lines.append(cleaned)
+    return "\n".join(kept_lines)
+
+
+def find_online_service(email: Email) -> str | None:
+    """Return the first known online service named in the alert body/subject, or None."""
+    cleaned = _strip_bank_footer_noise(f"{email.subject}\n{email.text}")
+    for name, pattern in _ONLINE_SERVICES:
+        if pattern.search(cleaned):
+            return name
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Amount detection
 # ---------------------------------------------------------------------------
 
@@ -305,6 +454,20 @@ def score_email(email: Email) -> PrefilterResult:
             keep=False,
             score=-100.0,
             reasons=["hard_drop:otp_or_password_reset"],
+        )
+
+    if is_bank_or_card_alert(email):
+        service = find_online_service(email)
+        if service:
+            return PrefilterResult(
+                keep=True,
+                score=4.0,
+                reasons=[f"alert_online_service:{service}(+4)"],
+            )
+        return PrefilterResult(
+            keep=False,
+            score=-3.0,
+            reasons=["alert_non_online(-3)"],
         )
 
     score = 0.0

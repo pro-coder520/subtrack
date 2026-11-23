@@ -10,7 +10,9 @@ from subtrack.gmail_client import parse_message
 from subtrack.models import Email
 from subtrack.prefilter import (
     KEEP_THRESHOLD,
+    find_online_service,
     has_amount,
+    is_bank_or_card_alert,
     is_otp_or_password_reset,
     score_email,
 )
@@ -213,3 +215,75 @@ class TestScoreEmail:
     def test_common_non_billing_junk_skipped(self, subject, body, unsub):
         res = score_email(make_email(subject=subject, text=body, list_unsubscribe=unsub))
         assert res.keep is False, f"Expected SKIP for {subject!r}, got {res}"
+
+
+class TestBankAndCardAlerts:
+    def test_debit_alert_naming_online_service_is_kept(self, gmail_message):
+        email = parse_message(gmail_message("bank_alert_online"))
+        assert is_bank_or_card_alert(email) is True
+        assert find_online_service(email) == "netflix"
+        res = score_email(email)
+        assert res.keep is True
+        assert res.reasons == ["alert_online_service:netflix(+4)"]
+
+    def test_debit_alert_local_transfer_with_bank_footer_is_skipped(self, gmail_message):
+        email = parse_message(gmail_message("bank_alert_local"))
+        assert is_bank_or_card_alert(email) is True
+        assert find_online_service(email) is None
+        res = score_email(email)
+        assert res.keep is False
+        assert res.reasons == ["alert_non_online(-3)"]
+
+    def test_card_decline_alert_is_always_kept_even_for_unknown_merchant(self, gmail_message):
+        email = parse_message(gmail_message("card_declined_alert"))
+        assert is_bank_or_card_alert(email) is False
+        res = score_email(email)
+        assert res.keep is True
+        assert any("payment_failed" in r for r in res.reasons)
+
+    def test_transaction_alert_with_declined_body_is_kept(self):
+        email = make_email(
+            subject="Transaction Alert",
+            text="Your card was declined for $12.00 at TinyTool LLC due to insufficient funds.",
+        )
+        assert is_bank_or_card_alert(email) is False
+        assert score_email(email).keep is True
+
+    @pytest.mark.parametrize(
+        "narration,expected",
+        [
+            ("WEB PMT SPOTIFY STOCKHOLM", "spotify"),
+            ("POS/WEB OPENAI *CHATGPT SUBSCR", "openai"),
+            ("APPLE.COM/BILL ITUNES.COM", "apple"),
+            ("GOOGLE *YouTubePremium", "google"),
+            ("AMAZON WEB SERVICES AWS.AMAZON", "aws"),
+            ("MULTICHOICE DSTV COMPACT", "dstv"),
+            ("SHOWMAX MONTHLY PLAN", "showmax"),
+            ("STARLINK INTERNET SERVICES", "starlink"),
+            ("GITHUB INC SAN FRANCISCO", "github"),
+        ],
+    )
+    def test_recognizes_major_online_services_in_debit_alerts(self, narration, expected):
+        email = make_email(
+            subject="Debit Alert",
+            text=f"Amount: NGN 5,000.00\nNarration: {narration}\nVisit www.bank.com for Internet Banking.",
+        )
+        res = score_email(email)
+        assert res.keep is True
+        assert res.reasons == [f"alert_online_service:{expected}(+4)"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "Amount: NGN 20,000\nNarration: NIP TRANSFER TO ADEOLA\nVisit www.mybank.com or Internet Banking.",
+            "Amount: NGN 8,500\nNarration: POS CHOWDECK LAGOS\nDownload our mobile app on the Apple App Store or Google Play.",
+            "Amount: NGN 3,000\nNarration: AIRTIME PURCHASE\nDisclaimer: For enquiries email support@mybank.com. Never share your PIN.",
+            "Amount: NGN 12,000\nNarration: POS LAWS PHARMACY LAGOS\nThank you for banking with us. Follow us on YouTube and LinkedIn.",
+        ],
+    )
+    def test_bank_footers_and_unrelated_words_do_not_count_as_online(self, body):
+        email = make_email(subject="Successful Transaction (Debit Alert)", text=body)
+        assert find_online_service(email) is None
+        res = score_email(email)
+        assert res.keep is False
+        assert res.reasons == ["alert_non_online(-3)"]

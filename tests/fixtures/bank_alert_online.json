@@ -1,0 +1,13 @@
+{
+  "id": "m_bank_online",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example Bank Alerts <alerts@mybank.example>",
+    "Subject": "Successful Transaction (Debit Alert)"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Dear Customer,\n\nA debit transaction occurred on your account.\nAmount: NGN 7,000.00\nDescription: WEB PMT NETFLIX.COM AMSTERDAM\nCard: **** 4417\nDate: 01-Mar-2026\n\nThank you for banking with us. Manage your account via Internet Banking at www.mybank.example."
+  }
+}

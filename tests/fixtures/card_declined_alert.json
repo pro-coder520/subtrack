@@ -1,0 +1,13 @@
+{
+  "id": "m_card_declined",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "VirtualCard <contact@vcard.example>",
+    "Subject": "[Warning] Your card was declined"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Hi Test User,\n\nYour virtual USD card ending 4417 was declined for $15.00 at SmallSaaS Inc due to insufficient funds. Please fund your card to avoid card termination."
+  }
+}

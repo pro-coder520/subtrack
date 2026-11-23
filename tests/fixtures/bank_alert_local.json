@@ -1,0 +1,13 @@
+{
+  "id": "m_bank_local",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example Bank Alerts <alerts@mybank.example>",
+    "Subject": "Successful Transaction (Debit Alert)"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Dear Customer,\n\nA debit transaction occurred on your account.\nAmount: NGN 15,500.00\nDescription: POS PURCHASE CORNER SUPERMARKET LAGOS NG\nDate: 01-Mar-2026\n\nThank you for banking with us.\nManage your account via Internet Banking at www.mybank.example.\nDownload our mobile app on the Apple App Store or Get it on Google Play."
+  }
+}
