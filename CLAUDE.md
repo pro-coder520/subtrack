@@ -184,12 +184,12 @@ Done when: `python -m subtrack auth` prints my address.
 Done when: a dry run on my inbox lists my receipts.
 
 ### Phase 2: Prefilter
-- [ ] Score each email and record the reasons:
+- [x] Score each email and record the reasons:
   - billing keywords
   - urgent keywords (failed, trial, cancelled)
   - an amount pattern ($, ₦, USD, NGN, N1,000)
   - a penalty for marketing words and for List-Unsubscribe
-- [ ] Bank and card alert rule (see Domain rules)
+- [x] Bank and card alert rule (see Domain rules)
 - [ ] The dry run shows keep/skip with reasons; add `--recheck-skipped`
 
 Done when: no receipt from my truth list is skipped, and few kept emails are obvious junk.
