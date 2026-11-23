@@ -1,0 +1,14 @@
+{
+  "id": "m_promo_discount",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "CodePrep <no-reply@codeprep.example>",
+    "Subject": "LIMITED TIME OFFER - $30 off Annual Subscription",
+    "List-Unsubscribe": "<mailto:unsub@codeprep.example>"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Hurry! Final hours to claim your $30 off discount on an Annual Subscription. Limited time offer ends tonight. Unsubscribe anytime."
+  }
+}

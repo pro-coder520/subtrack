@@ -1,0 +1,14 @@
+{
+  "id": "m_payment_failed",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Streamco <info@account.streamco.example>",
+    "Subject": "Your payment was unsuccessful",
+    "List-Unsubscribe": "<mailto:unsub@account.streamco.example>"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "We were unable to process your monthly membership payment of NGN 7,000. Please update your payment method so your service is not interrupted."
+  }
+}

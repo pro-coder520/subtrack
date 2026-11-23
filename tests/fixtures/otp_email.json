@@ -1,0 +1,13 @@
+{
+  "id": "m_otp",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Example Bank <no-reply@bank.example>",
+    "Subject": "Your One-Time Password (OTP) for payment authorization"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "Your one-time password is 482910 to authorize a payment of $20.00. Do not share this OTP with anyone. It expires in 5 minutes."
+  }
+}

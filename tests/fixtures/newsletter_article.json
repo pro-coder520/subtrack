@@ -1,0 +1,14 @@
+{
+  "id": "m_newsletter",
+  "internalDate": "1772356500000",
+  "headers": {
+    "From": "Dev Digest <digest@blog.example>",
+    "Subject": "How I Built a Tool That Finds Leaks in a Subscription Business",
+    "List-Unsubscribe": "<mailto:unsub@blog.example>"
+  },
+  "payload": {
+    "mimeType": "text/plain",
+    "charset": "utf-8",
+    "text": "In this week's issue we look at SaaS metrics, churn analysis, and why subscription businesses miss revenue. Read the full post on our blog."
+  }
+}
