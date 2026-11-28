@@ -190,7 +190,7 @@ Done when: a dry run on my inbox lists my receipts.
   - an amount pattern ($, ₦, USD, NGN, N1,000)
   - a penalty for marketing words and for List-Unsubscribe
 - [x] Bank and card alert rule (see Domain rules)
-- [ ] The dry run shows keep/skip with reasons; add `--recheck-skipped`
+- [x] The dry run shows keep/skip with reasons; add `--recheck-skipped`
 
 Done when: no receipt from my truth list is skipped, and few kept emails are obvious junk.
 
