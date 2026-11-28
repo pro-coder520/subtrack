@@ -20,6 +20,9 @@ class TestPaths:
     def test_token_path(self):
         assert config.TOKEN_PATH == config.DATA_DIR / "token.json"
 
+    def test_redact_path(self):
+        assert config.REDACT_PATH == config.DATA_DIR / "redact.txt"
+
 
 class TestEnvVars:
     def test_get_model_default(self):
@@ -45,6 +48,42 @@ class TestEnvVars:
     def test_get_gemini_api_key_set(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key-123"}):
             assert config.get_gemini_api_key() == "test-key-123"
+
+    def test_get_gemini_rpm_default_and_override(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert config.get_gemini_rpm() == 10.0
+        with mock.patch.dict(os.environ, {"SUBTRACK_GEMINI_RPM": "15"}):
+            assert config.get_gemini_rpm() == 15.0
+
+    def test_get_gemini_rpm_invalid_raises(self):
+        import pytest
+
+        for bad in ("0", "-5", "fast"):
+            with mock.patch.dict(os.environ, {"SUBTRACK_GEMINI_RPM": bad}):
+                with pytest.raises(ValueError):
+                    config.get_gemini_rpm()
+
+
+class TestRedactTerms:
+    def test_missing_file_and_empty_env_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "REDACT_PATH", tmp_path / "redact.txt")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert config.get_redact_terms() == []
+
+    def test_merges_file_and_env_longest_first(self, tmp_path, monkeypatch):
+        redact_file = tmp_path / "redact.txt"
+        redact_file.write_text(
+            "# My personal terms\nJane Doe\n\nJane\n12 Sample Road\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config, "REDACT_PATH", redact_file)
+        with mock.patch.dict(os.environ, {"SUBTRACK_REDACT_TERMS": "jane doe, jdoe99"}):
+            assert config.get_redact_terms() == [
+                "12 Sample Road",
+                "Jane Doe",
+                "jdoe99",
+                "Jane",
+            ]
 
 
 class TestEnsureDataDir:
